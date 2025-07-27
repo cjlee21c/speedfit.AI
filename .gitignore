@@ -1,0 +1,19 @@
+# Security - Never commit these files
+.env
+*.env
+config.json
+
+# Backend
+backend/models/*.pt
+backend/__pycache__/
+backend/.env
+
+# iOS
+Speedfit.AI.xcodeproj/xcuserdata/
+Speedfit.AI.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate
+
+# Temporary files
+*.tmp
+temp/
+logs/

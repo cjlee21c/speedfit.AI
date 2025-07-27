@@ -11,8 +11,9 @@ import AVKit
 
 struct ContentView: View {
     // Backend URL
+    // TODO: Replace with your actual server IP before building
     private let backendURL = "http://192.168.35.143:8000"
-    
+    //When @state variable's value changed, SwiftUI invalidates the view and re-renders the body
     @State private var selectedItem: PhotosPickerItem?
     @State private var selectedVideoURL: URL?
     @State private var showingVideoPicker = false
@@ -28,7 +29,7 @@ struct ContentView: View {
         case benchPress = "Bench Press"
         case deadlift = "Deadlift"
     }
-    
+    //body property describes the layout and components of your view
     var body: some View {
         NavigationView {
             VStack(spacing: 20) {
@@ -63,7 +64,7 @@ struct ContentView: View {
                                 .foregroundColor(.gray)
                         )
                 }
-                
+                //this is UI component for users to select video from photo library
                 PhotosPicker(
                     selection: $selectedItem,
                     matching: .videos
@@ -76,10 +77,13 @@ struct ContentView: View {
                         .background(Color.blue)
                         .cornerRadius(10)
                 }
+                
+                // .onChange modifier observes the selectedItem variable. If it changes, it executes inner codes
                 .onChange(of: selectedItem) { newItem in
                     Task {
                         if let data = try? await newItem?.loadTransferable(type: Data.self) {
                             // Save video to temporary directory
+                            // Loaded data us written to a temporary file on the device's local storaoge
                             let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("selected_video.mov")
                             try? data.write(to: tempURL)
                             selectedVideoURL = tempURL
@@ -114,7 +118,7 @@ struct ContentView: View {
             }
         }
     }
-    
+    //this function is for communication with main.py the backend part
     func uploadVideo() async {
         guard let videoURL = selectedVideoURL else { return }
         
@@ -134,14 +138,18 @@ struct ContentView: View {
             
             // Add the video file to the request body
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            //content-Disposition declares that this section contains form data
+            //The name "video" must match with parameter name in my FastAPI endpoint to crrectly identify the data
             body.append("Content-Disposition: form-data; name=\"video\"; filename=\"video.mov\"\r\n".data(using: .utf8)!)
             body.append("Content-Type: video/quicktime\r\n\r\n".data(using: .utf8)!)
             body.append(videoData)
             body.append("\r\n".data(using: .utf8)!)
             body.append("--\(boundary)--\r\n".data(using: .utf8)!)
             
+            //fully constructed body is assigned to the URLRequest
             request.httpBody = body
             
+            //this is the modern Swift concurrency API for executing a network request
             let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse else {

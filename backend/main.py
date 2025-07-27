@@ -7,12 +7,12 @@ import tempfile
 import os
 from pathlib import Path
 
-app = FastAPI(title="Speedfit.AI Backend")
+app = FastAPI(title="Speedfit.AI Backend")  #creating main application instance
 
 # Global variable for the YOLO model
 model = None
 
-@app.on_event("startup")
+@app.on_event("startup") #run this function one time, right after server starts up before accepting any requests --> making api much faster
 async def load_model():
     global model
     model_path = Path("models/best.pt")  # Update this path to where you'll store your model
@@ -20,10 +20,16 @@ async def load_model():
         raise RuntimeError("YOLO model not found")
     model = YOLO(model_path)
 
-@app.post("/analyze-lift/")
+@app.post("/analyze-lift/")  #important part,,Swift app sends a post request through /analyze-lift/ URL, telling FastAPI that this function is activated
 async def analyze_lift(video: UploadFile = File(...)):
+    # Security: Validate file type and size
     if not video.filename.endswith(('.mp4', '.mov', '.avi')):
         raise HTTPException(status_code=400, detail="Invalid video format")
+    
+    # Security: Limit file size to 100MB
+    MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+    if video.size and video.size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 100MB")
     
     # Save uploaded video to temp file
     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(video.filename)[1]) as temp_video:
@@ -41,17 +47,17 @@ async def analyze_lift(video: UploadFile = File(...)):
         # Create output video writer
         output_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height)) #creating a new, blank video file where final video with bar path drawn on it.
         
         bar_positions = []
         
-        while cap.isOpened():
+        while cap.isOpened():   #while loop reads video using .read() one frame at a time until the video is over
             ret, frame = cap.read()
             if not ret:
                 break
                 
             # Run YOLO detection
-            results = model(frame)
+            results = model(frame)   #results holds everything the model found in that one frame
             
             # Find the best "bar tip" detection in the frame
             best_bar_tip = None
