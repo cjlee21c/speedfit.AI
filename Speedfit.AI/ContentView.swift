@@ -10,8 +10,8 @@ import PhotosUI
 import AVKit
 
 struct ContentView: View {
-    // Backend URL - Configuration should be externalized for production
-    private let backendURL = "http://192.168.35.143:8000"
+    // Backend URL - Configuration should be externalized for production  
+    private let backendURL = "http://192.168.45.167:8000"
     //When @state variable's value changed, SwiftUI invalidates the view and re-renders the body
     @State private var selectedItem: PhotosPickerItem?
     @State private var selectedVideoURL: URL?

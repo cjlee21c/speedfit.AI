@@ -21,49 +21,38 @@ async def load_model():
         raise RuntimeError("YOLO model not found")
     model = YOLO(model_path)
 
-def calculate_calibration(frame, plate_diameter_meters):
+def calculate_calibration_from_yolo(results, plate_diameter_meters):
     """
-    Calculate pixels per meter using plate detection
+    Calculate pixels per meter using YOLO detected plates (class 0)
     """
-    # Convert to HSV for better color detection
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    best_plate = None
+    max_conf = 0
     
-    # Create a mask for dark circular objects (plates)
-    # Adjust these values based on your plate colors
-    lower_dark = np.array([0, 0, 0])
-    upper_dark = np.array([180, 255, 100])
-    mask = cv2.inRange(hsv, lower_dark, upper_dark)
+    if len(results) > 0 and len(results[0].boxes) > 0:
+        for box in results[0].boxes:
+            # Look for plates (class 0) with high confidence
+            if int(box.cls) == 0 and box.conf[0] > max_conf and box.conf[0] > 0.7:
+                max_conf = box.conf[0]
+                best_plate = box
     
-    # Find contours
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # Find the largest circular contour (likely a plate)
-    best_circle = None
-    max_area = 0
-    
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area > max_area and area > 1000:  # Minimum area threshold
-            # Check if contour is roughly circular
-            perimeter = cv2.arcLength(contour, True)
-            if perimeter > 0:
-                circularity = 4 * math.pi * area / (perimeter * perimeter)
-                if circularity > 0.5:  # Reasonably circular
-                    # Get bounding circle
-                    (x, y), radius = cv2.minEnclosingCircle(contour)
-                    if radius > 20:  # Minimum radius threshold
-                        best_circle = ((int(x), int(y)), int(radius))
-                        max_area = area
-    
-    if best_circle:
+    if best_plate is not None:
+        # Get plate bounding box coordinates
+        x1, y1, x2, y2 = best_plate.xyxy[0].cpu().numpy()
+        
+        # Calculate plate diameter in pixels (average of width and height)
+        width = x2 - x1
+        height = y2 - y1
+        diameter_pixels = (width + height) / 2
+        
         # Calculate pixels per meter
-        radius_pixels = best_circle[1]
-        diameter_pixels = radius_pixels * 2
         pixels_per_meter = diameter_pixels / plate_diameter_meters
-        return pixels_per_meter, best_circle
+        
+        # Return calibration data and plate info for visualization
+        plate_center = ((int((x1+x2)/2), int((y1+y2)/2)), int(diameter_pixels/2))
+        return pixels_per_meter, plate_center, max_conf
     
-    # Fallback: estimate based on frame size (rough approximation)
-    return 800.0, None  # Default approximation
+    # Fallback: estimate based on frame size if no plates detected
+    return 800.0, None, 0.0
 
 @app.post("/analyze-lift/")  #important part,,Swift app sends a post request through /analyze-lift/ URL, telling FastAPI that this function is activated
 async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Form(0.45)):
@@ -107,31 +96,33 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
         velocities = []
         timestamps = []
         pixels_per_meter = None
-        calibration_frame_count = 0
+        calibration_confidence = 0.0
         frame_number = 0
         
         while cap.isOpened():   #while loop reads video using .read() one frame at a time until the video is over
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            # Perform calibration on early frames if not yet calibrated
-            if pixels_per_meter is None and calibration_frame_count < 10:
-                temp_pixels_per_meter, detected_circle = calculate_calibration(frame, plate_diameter)
-                if detected_circle:
-                    pixels_per_meter = temp_pixels_per_meter
-                    # Draw calibration circle for feedback
-                    cv2.circle(frame, detected_circle[0], detected_circle[1], (255, 0, 0), 2)
-                    cv2.putText(frame, f"Calibrated: {pixels_per_meter:.1f} px/m", 
-                              (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-                calibration_frame_count += 1
-            
-            # Use fallback calibration if none found
-            if pixels_per_meter is None and calibration_frame_count >= 10:
-                pixels_per_meter = 800.0  # Default fallback
                 
             # Run YOLO detection
             results = model(frame)   #results holds everything the model found in that one frame
+            
+            # Perform calibration using YOLO detected plates if not yet calibrated
+            if pixels_per_meter is None:
+                temp_pixels_per_meter, detected_plate, confidence = calculate_calibration_from_yolo(results, plate_diameter)
+                if detected_plate and confidence > calibration_confidence:
+                    pixels_per_meter = temp_pixels_per_meter
+                    calibration_confidence = confidence
+                    # Draw calibration circle around detected plate
+                    cv2.circle(frame, detected_plate[0], detected_plate[1], (255, 0, 0), 3)
+                    cv2.putText(frame, f"Calibrated: {pixels_per_meter:.1f} px/m (conf: {confidence:.2f})", 
+                              (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+            
+            # Use fallback calibration if no plates detected after several frames
+            if pixels_per_meter is None and frame_number > 30:
+                pixels_per_meter = 800.0  # Default fallback
+                cv2.putText(frame, "Using default calibration (no plates detected)", 
+                          (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             
             # Find the best "bar tip" detection in the frame
             best_bar_tip = None
