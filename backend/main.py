@@ -81,8 +81,10 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
         temp_video_path = temp_video.name
 
     try:
+        print(f"Processing video: {video.filename}, size: {video.size} bytes")
         # Open video file
         cap = cv2.VideoCapture(temp_video_path)
+        print(f"Video opened: {cap.isOpened()}")
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -98,6 +100,14 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
         pixels_per_meter = None
         calibration_confidence = 0.0
         frame_number = 0
+        
+        # Rep tracking variables (with safe defaults)
+        rep_state = "READY"
+        rep_start_time = 0.0
+        rep_start_y = 0.0
+        velocity_window = []
+        completed_reps = []
+        current_rep_velocity = 0.0
         
         while cap.isOpened():   #while loop reads video using .read() one frame at a time until the video is over
             ret, frame = cap.read()
@@ -145,6 +155,46 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
                 bar_positions.append(bar_center)
                 timestamps.append(frame_number / fps)  # Time in seconds
                 
+                # Safe rep tracking
+                try:
+                    if len(bar_positions) >= 2 and len(timestamps) >= 2:
+                        current_y = bar_center[1]
+                        current_time = timestamps[-1]
+                        prev_y = bar_positions[-2][1] 
+                        prev_time = timestamps[-2]
+                        
+                        # Calculate Y velocity safely
+                        time_diff = current_time - prev_time
+                        if time_diff > 0 and pixels_per_meter and pixels_per_meter > 0:
+                            y_velocity_pixels = (current_y - prev_y) / time_diff
+                            y_velocity_ms = -y_velocity_pixels / pixels_per_meter  # Negative = up
+                            
+                            # Add to velocity window
+                            velocity_window.append(y_velocity_ms)
+                            if len(velocity_window) > 10:
+                                velocity_window.pop(0)
+                            
+                            # Simple rep detection
+                            if len(velocity_window) >= 5:
+                                avg_velocity = sum(velocity_window) / len(velocity_window)
+                                
+                                if avg_velocity > 0.05 and rep_state == "READY":
+                                    rep_state = "LIFTING"
+                                    rep_start_time = current_time
+                                    rep_start_y = current_y
+                                elif avg_velocity <= 0.0 and rep_state == "LIFTING":
+                                    # Rep completed
+                                    rep_duration = current_time - rep_start_time
+                                    if rep_duration > 0.5:
+                                        rep_distance = abs(rep_start_y - current_y) / pixels_per_meter
+                                        rep_velocity = rep_distance / rep_duration
+                                        completed_reps.append(rep_velocity)
+                                        current_rep_velocity = rep_velocity
+                                    rep_state = "READY"
+                except Exception as e:
+                    print(f"Rep tracking error (skipping): {e}")
+                    pass  # Continue processing even if rep tracking fails
+                
                 # Calculate velocity if we have enough positions
                 current_velocity = 0.0
                 if len(bar_positions) >= 3 and pixels_per_meter:
@@ -182,6 +232,23 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
                     velocity_text = f"Speed: {current_velocity:.2f} m/s"
                     cv2.putText(frame, velocity_text, (10, height - 30), 
                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                
+                # Safe rep overlay
+                try:
+                    # Draw rep info box
+                    cv2.rectangle(frame, (10, 10), (200, 80), (0, 0, 0), -1)
+                    cv2.rectangle(frame, (10, 10), (200, 80), (255, 255, 255), 2)
+                    
+                    cv2.putText(frame, f"Reps: {len(completed_reps)}", (20, 30), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    cv2.putText(frame, f"State: {rep_state}", (20, 50), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                    if current_rep_velocity > 0:
+                        cv2.putText(frame, f"Last: {current_rep_velocity:.2f}m/s", (20, 70), 
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                except Exception as e:
+                    print(f"Overlay error (skipping): {e}")
+                    pass
             
             # Write the frame
             out.write(frame)
