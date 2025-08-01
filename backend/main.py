@@ -21,6 +21,7 @@ async def load_model():
         raise RuntimeError("YOLO model not found")
     model = YOLO(model_path)
 
+#finding the barbell plate
 def calculate_calibration_from_yolo(results, plate_diameter_meters):
     """
     Calculate pixels per meter using YOLO detected plates (class 0)
@@ -95,7 +96,6 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height)) #creating a new, blank video file where final video with bar path drawn on it.
         
         bar_positions = []
-        velocities = []
         timestamps = []
         pixels_per_meter = None
         calibration_confidence = 0.0
@@ -109,13 +109,28 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
         completed_reps = []
         current_rep_velocity = 0.0
         
+        # Frame skipping for performance optimization
+        frame_skip = 2  # Process every 2nd frame for YOLO detection
+        last_results = None  # Store last YOLO results for skipped frames
+        yolo_calls = 0  # Track how many times YOLO actually runs
+        
         while cap.isOpened():   #while loop reads video using .read() one frame at a time until the video is over
             ret, frame = cap.read()
             if not ret:
                 break
                 
-            # Run YOLO detection
-            results = model(frame)   #results holds everything the model found in that one frame
+            # Frame skipping optimization: only run YOLO on selected frames
+            if frame_number % frame_skip == 0:
+                # Run YOLO detection on this frame
+                #results contain bouding box (coordinates of the box, access with .xyxy), class IO (.cls), and confidency score
+                results = model(frame)   #results holds everything the model found in that one frame
+                last_results = results  # Store for next skipped frame
+                yolo_processed = True
+                yolo_calls += 1
+            else:
+                # Use previous frame's YOLO results
+                results = last_results if last_results is not None else model(frame)
+                yolo_processed = False
             
             # Perform calibration using YOLO detected plates if not yet calibrated
             if pixels_per_meter is None:
@@ -144,7 +159,7 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
                     if int(box.cls) == 1 and box.conf[0] > max_conf:
                         max_conf = box.conf[0]
                         best_bar_tip = box
-
+ 
             # If a confident bar tip was found, use it to draw the path
             if best_bar_tip is not None and best_bar_tip.conf[0] > 0.25: # Confidence threshold
                 # Get the coordinates of the bar tip box
@@ -157,6 +172,7 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
                 
                 # Safe rep tracking
                 try:
+                #bar_positions --> list of all the (x,y) coordinates of the bar, one for each frame
                     if len(bar_positions) >= 2 and len(timestamps) >= 2:
                         current_y = bar_center[1]
                         current_time = timestamps[-1]
@@ -195,83 +211,66 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
                     print(f"Rep tracking error (skipping): {e}")
                     pass  # Continue processing even if rep tracking fails
                 
-                # Calculate velocity if we have enough positions
-                current_velocity = 0.0
-                if len(bar_positions) >= 3 and pixels_per_meter:
-                    # Use last 3 points for smoother velocity calculation
-                    pos_current = bar_positions[-1]
-                    pos_prev = bar_positions[-2]
-                    time_current = timestamps[-1]
-                    time_prev = timestamps[-2]
-                    
-                    # Calculate distance in pixels and convert to meters
-                    distance_pixels = np.linalg.norm(pos_current - pos_prev)
-                    distance_meters = distance_pixels / pixels_per_meter
-                    
-                    # Calculate time difference
-                    time_diff = time_current - time_prev
-                    
-                    if time_diff > 0:
-                        current_velocity = distance_meters / time_diff  # m/s
-                        
-                        # Apply smoothing filter
-                        if len(velocities) > 0:
-                            # Simple exponential smoothing
-                            alpha = 0.3
-                            current_velocity = alpha * current_velocity + (1 - alpha) * velocities[-1]
-                
-                velocities.append(current_velocity)
                 
                 # Draw the bar path on the frame
                 if len(bar_positions) > 1:
                     points = np.array(bar_positions, dtype=np.int32)
                     cv2.polylines(frame, [points], isClosed=False, color=(0, 255, 0), thickness=2)
                 
-                # Display velocity on frame
-                if current_velocity > 0:
-                    velocity_text = f"Speed: {current_velocity:.2f} m/s"
-                    cv2.putText(frame, velocity_text, (10, height - 30), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
                 
-                # Safe rep overlay
+                # Safe rep overlay - bottom left, bigger size
                 try:
-                    # Draw rep info box
-                    cv2.rectangle(frame, (10, 10), (200, 80), (0, 0, 0), -1)
-                    cv2.rectangle(frame, (10, 10), (200, 80), (255, 255, 255), 2)
+                    # Calculate position for bottom-left (bigger box)
+                    box_width = 200
+                    box_height = 120
+                    box_x = 20
+                    box_y = height - box_height - 20
                     
-                    cv2.putText(frame, f"Reps: {len(completed_reps)}", (20, 30), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                    cv2.putText(frame, f"State: {rep_state}", (20, 50), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                    # Draw rep info box
+                    cv2.rectangle(frame, (box_x, box_y), (box_x + box_width, box_y + box_height), (0, 0, 0), -1)
+                    cv2.rectangle(frame, (box_x, box_y), (box_x + box_width, box_y + box_height), (255, 255, 255), 3)
+                    
+                    cv2.putText(frame, f"Reps: {len(completed_reps)}", (box_x + 15, box_y + 35), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                    cv2.putText(frame, f"State: {rep_state}", (box_x + 15, box_y + 70), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                     if current_rep_velocity > 0:
-                        cv2.putText(frame, f"Last: {current_rep_velocity:.2f}m/s", (20, 70), 
-                                  cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                        cv2.putText(frame, f"Last: {current_rep_velocity:.2f}m/s", (box_x + 15, box_y + 105), 
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                 except Exception as e:
                     print(f"Overlay error (skipping): {e}")
                     pass
+            
+            # Add performance indicator
+            perf_color = (0, 255, 0) if yolo_processed else (255, 255, 0)  # Green if YOLO ran, yellow if skipped
+            perf_text = "YOLO" if yolo_processed else "SKIP"
+            cv2.putText(frame, perf_text, (width - 60, 25), 
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, perf_color, 1)
             
             # Write the frame
             out.write(frame)
             frame_number += 1
         
-        # Calculate velocity statistics
-        velocity_stats = {}
-        if velocities:
-            valid_velocities = [v for v in velocities if v > 0]
-            if valid_velocities:
-                velocity_stats = {
-                    "peak_velocity": max(valid_velocities),
-                    "mean_velocity": sum(valid_velocities) / len(valid_velocities),
-                    "total_distance": sum(distances for distances in [
-                        np.linalg.norm(bar_positions[i+1] - bar_positions[i]) / pixels_per_meter 
-                        for i in range(len(bar_positions)-1)
-                    ] if pixels_per_meter),
-                    "calibration_used": pixels_per_meter is not None,
-                    "pixels_per_meter": pixels_per_meter or 0
-                }
+        # Calculate session statistics (per-rep data only)
+        session_stats = {}
+        if completed_reps:
+            session_average = sum(completed_reps) / len(completed_reps)
+            session_stats = {
+                "session_average": session_average,
+                "total_reps": len(completed_reps),
+                "rep_speeds": completed_reps,
+                "calibration_used": pixels_per_meter is not None,
+                "pixels_per_meter": pixels_per_meter or 0
+            }
         
-        # Print velocity stats to console for debugging
-        print(f"Velocity Analysis Complete: {velocity_stats}")
+        # Print session stats to console for debugging
+        print(f"Session Analysis Complete: {session_stats}")
+        
+        # Print performance optimization stats
+        total_frames = frame_number
+        frames_saved = total_frames - yolo_calls
+        speed_improvement = (frames_saved / total_frames) * 100 if total_frames > 0 else 0
+        print(f"Performance Optimization: {yolo_calls}/{total_frames} YOLO calls ({speed_improvement:.1f}% faster)")
         
         # Clean up
         cap.release()
@@ -279,11 +278,11 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
         cv2.destroyAllWindows()
         os.unlink(temp_video_path)
         
-        # Store metrics in a temporary file alongside video
+        # Store session metrics in a temporary file alongside video
         metrics_path = output_path.replace('.mp4', '_metrics.json')
         import json
         with open(metrics_path, 'w') as f:
-            json.dump(velocity_stats, f)
+            json.dump(session_stats, f)
         
         # Return the processed video
         return FileResponse(
