@@ -11,7 +11,7 @@ import AVKit
 
 struct ContentView: View {
     // Backend URL - Configuration should be externalized for production  
-    private let backendURL = "http://192.168.35.143:8000"
+    private let backendURL = "http://172.20.10.3:8000"
     //When @state variable's value changed, SwiftUI invalidates the view and re-renders the body
     @State private var selectedItem: PhotosPickerItem?
     @State private var selectedVideoURL: URL?
@@ -24,12 +24,12 @@ struct ContentView: View {
     @State private var alertMessage = ""
     @State private var plateSize: PlateSize = .standard45
     @State private var showCameraGuidance = false
-    @State private var velocityMetrics: VelocityMetrics?
+    @State private var sessionMetrics: SessionMetrics?
     
-    struct VelocityMetrics: Codable {
-        let peak_velocity: Double
-        let mean_velocity: Double
-        let total_distance: Double
+    struct SessionMetrics: Codable {
+        let session_average: Double?
+        let total_reps: Int
+        let rep_speeds: [Double]
         let calibration_used: Bool
         let pixels_per_meter: Double
     }
@@ -133,7 +133,7 @@ struct ContentView: View {
                             try? data.write(to: tempURL)
                             selectedVideoURL = tempURL
                             processedVideoURL = nil // Reset processed video when new video is selected
-                            velocityMetrics = nil // Reset metrics when new video is selected
+                            sessionMetrics = nil // Reset metrics when new video is selected
                         }
                     }
                 }
@@ -155,48 +155,35 @@ struct ContentView: View {
                     .disabled(isUploading)
                 }
                 
-                // Display velocity metrics if available
-                if let metrics = velocityMetrics {
+                // Display session metrics if available
+                if let metrics = sessionMetrics {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Speed Analysis")
+                        Text("Session Results")
                             .font(.headline)
                             .padding(.top)
                         
+                        // Session Summary
                         HStack {
                             VStack(alignment: .leading) {
-                                Text("Peak Speed")
+                                Text("Session Average")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                Text("\(metrics.peak_velocity, specifier: "%.2f") m/s")
+                                Text("\(metrics.session_average ?? 0.0, specifier: "%.2f") m/s")
                                     .font(.title2)
                                     .bold()
-                                    .foregroundColor(.red)
+                                    .foregroundColor(.blue)
                             }
                             
                             Spacer()
                             
                             VStack(alignment: .leading) {
-                                Text("Average Speed")
+                                Text("Total Reps")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                Text("\(metrics.mean_velocity, specifier: "%.2f") m/s")
+                                Text("\(metrics.total_reps)")
                                     .font(.title2)
                                     .bold()
-                                    .foregroundColor(.blue)
-                            }
-                        }
-                        .padding()
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                        
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text("Total Distance")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                Text("\(metrics.total_distance, specifier: "%.2f") m")
-                                    .font(.title3)
-                                    .bold()
+                                    .foregroundColor(.green)
                             }
                             
                             Spacer()
@@ -205,12 +192,35 @@ struct ContentView: View {
                                 Text("Calibration")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                Text(metrics.calibration_used ? "✓ Used" : "⚠ Default")
+                                Text(metrics.calibration_used ? "✓" : "⚠")
                                     .font(.caption)
                                     .foregroundColor(metrics.calibration_used ? .green : .orange)
                             }
                         }
-                        .padding(.horizontal)
+                        .padding()
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                        
+                        // Individual Rep Speeds
+                        if !metrics.rep_speeds.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Individual Reps")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                ForEach(Array(metrics.rep_speeds.enumerated()), id: \.offset) { index, speed in
+                                    HStack {
+                                        Text("Rep \(index + 1):")
+                                            .font(.caption)
+                                        Spacer()
+                                        Text("\(speed, specifier: "%.2f") m/s")
+                                            .font(.caption)
+                                            .bold()
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
                     }
                 }
             }
@@ -277,8 +287,8 @@ struct ContentView: View {
                 let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("processed_video.mp4")
                 try data.write(to: tempURL)
                 
-                // Try to fetch velocity metrics
-                await fetchVelocityMetrics()
+                // Try to fetch session metrics
+                await fetchSessionMetrics()
                 
                 // Update the UI on the main thread
                 await MainActor.run {
@@ -297,7 +307,7 @@ struct ContentView: View {
         }
     }
     
-    func fetchVelocityMetrics() async {
+    func fetchSessionMetrics() async {
         // Since we don't have a specific video ID from the backend yet,
         // we'll create a simple implementation that waits and tries to fetch
         // This would need to be improved with proper video ID handling
@@ -305,19 +315,19 @@ struct ContentView: View {
         do {
             // For now, we'll use a mock implementation
             // In a real implementation, you'd get the video ID from the upload response
-            let mockMetrics = VelocityMetrics(
-                peak_velocity: 2.1,
-                mean_velocity: 1.5,
-                total_distance: 0.8,
+            let mockMetrics = SessionMetrics(
+                session_average: 1.8,
+                total_reps: 3,
+                rep_speeds: [1.5, 2.1, 1.8],
                 calibration_used: true,
                 pixels_per_meter: 800.0
             )
             
             await MainActor.run {
-                velocityMetrics = mockMetrics
+                sessionMetrics = mockMetrics
             }
         } catch {
-            print("Failed to fetch velocity metrics: \(error)")
+            print("Failed to fetch session metrics: \(error)")
         }
     }
 }
