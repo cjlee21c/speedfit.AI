@@ -11,7 +11,7 @@ import SwiftUI
 struct Speedfit_AIApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            HomeView()
         }
     }
 }
