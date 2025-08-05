@@ -29,9 +29,22 @@
 		23EB55DE2E337DCA00160283 /* Speedfit.AIUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Speedfit.AIUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		23EB56152E3E011F00160283 /* Exceptions for "Speedfit.AI" folder in "Speedfit.AI" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist.backup,
+			);
+			target = 23EB55C62E337DC800160283 /* Speedfit.AI */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		23EB55C92E337DC800160283 /* Speedfit.AI */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				23EB56152E3E011F00160283 /* Exceptions for "Speedfit.AI" folder in "Speedfit.AI" target */,
+			);
 			path = Speedfit.AI;
 			sourceTree = "<group>";
 		};
@@ -321,6 +334,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_FILE = Speedfit.AI/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
@@ -378,6 +392,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_FILE = Speedfit.AI/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
@@ -398,6 +413,7 @@
 				DEVELOPMENT_TEAM = S52CK84776;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "\"This app needs permission to save processed videos\"";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "\"This app needs access to select videos for lift analysis\"";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -428,6 +444,7 @@
 				DEVELOPMENT_TEAM = S52CK84776;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "\"This app needs permission to save processed videos\"";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "\"This app needs access to select videos for lift analysis\"";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -455,6 +472,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "cj.co.Speedfit-AITests";
@@ -473,6 +491,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "cj.co.Speedfit-AITests";
@@ -490,6 +509,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "cj.co.Speedfit-AIUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -506,6 +526,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "cj.co.Speedfit-AIUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
