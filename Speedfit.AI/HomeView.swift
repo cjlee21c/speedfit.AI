@@ -108,26 +108,7 @@ struct HomeView: View {
             ImportView()
         }
         .sheet(isPresented: $showingHistory) {
-            // Placeholder for HistoryView
-            NavigationView {
-                VStack {
-                    Text("View History")
-                        .font(.largeTitle)
-                        .padding()
-                    Text("HistoryView will be implemented later")
-                        .foregroundColor(.secondary)
-                    Spacer()
-                }
-                .navigationTitle("History")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") {
-                            showingHistory = false
-                        }
-                    }
-                }
-            }
+            HistoryView()
         }
     }
 }

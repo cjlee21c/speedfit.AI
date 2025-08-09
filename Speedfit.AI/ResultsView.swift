@@ -241,3 +241,4 @@ struct MetricCard: View {
     
     return ResultsView(workoutData: workoutData)
 }
+

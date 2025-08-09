@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Depends
 from fastapi.responses import FileResponse, JSONResponse
 from ultralytics import YOLO
 import cv2
@@ -7,6 +7,8 @@ import tempfile
 import os
 from pathlib import Path
 import math
+from auth import get_current_user, get_current_user_optional, supabase
+from typing import Optional, Dict, Any
 
 app = FastAPI(title="Speedfit.AI Backend")  #creating main application instance
 
@@ -56,7 +58,13 @@ def calculate_calibration_from_yolo(results, plate_diameter_meters):
     return 800.0, None, 0.0
 
 @app.post("/analyze-lift/")  #important part,,Swift app sends a post request through /analyze-lift/ URL, telling FastAPI that this function is activated
-async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Form(0.45)):
+async def analyze_lift(
+    video: UploadFile = File(...), 
+    plate_diameter: float = Form(0.45),
+    lift_type: str = Form("Squat"),
+    weight: Optional[float] = Form(None),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
+):
     # Security: Validate file type and size
     if not video.filename or not video.filename.lower().endswith(('.mp4', '.mov', '.avi')):
         raise HTTPException(status_code=400, detail="Invalid video format")
@@ -280,15 +288,70 @@ async def analyze_lift(video: UploadFile = File(...), plate_diameter: float = Fo
         
         # Store session metrics in a temporary file alongside video
         metrics_path = output_path.replace('.mp4', '_metrics.json')
+        print(f"DEBUG: Creating metrics file at: {metrics_path}")
+        print(f"DEBUG: Output path was: {output_path}")
         import json
         with open(metrics_path, 'w') as f:
             json.dump(session_stats, f)
+        print(f"DEBUG: Metrics file created successfully")
+        
+        # Save to database if user is authenticated
+        session_id = None
+        user_authenticated = current_user is not None
+        has_reps = session_stats.get("total_reps", 0) > 0
+        print(f"DEBUG: User authenticated: {user_authenticated}, Has reps: {has_reps}")
+        
+        if current_user and session_stats.get("total_reps", 0) > 0:
+            try:
+                # Determine plate size string from diameter
+                plate_size_map = {
+                    0.45: "45cm (Olympic)",
+                    0.35: "35cm (Standard)", 
+                    0.25: "25cm (Small)"
+                }
+                plate_size = plate_size_map.get(plate_diameter, "45cm (Olympic)")
+                
+                # Insert workout session
+                session_data = {
+                    "user_id": current_user["id"],
+                    "lift_type": lift_type,
+                    "weight": weight,
+                    "plate_size": plate_size,
+                    "session_average": session_stats.get("session_average"),
+                    "total_reps": session_stats.get("total_reps", 0),
+                    "calibration_used": session_stats.get("calibration_used", False),
+                    "pixels_per_meter": session_stats.get("pixels_per_meter", 0)
+                }
+                
+                session_response = supabase.table("workout_sessions").insert(session_data).execute()
+                
+                if session_response.data:
+                    session_id = session_response.data[0]["id"]
+                    
+                    # Insert individual rep analysis
+                    for i, velocity in enumerate(session_stats.get("rep_speeds", [])):
+                        rep_data = {
+                            "session_id": session_id,
+                            "rep_number": i + 1,
+                            "velocity": velocity
+                        }
+                        supabase.table("rep_analysis").insert(rep_data).execute()
+                    
+                    print(f"Saved workout session {session_id} for user {current_user['id']}")
+                
+            except Exception as e:
+                print(f"Error saving session to database: {e}")
+                # Continue without failing the request
         
         # Return the processed video
+        headers = {"X-Metrics-Path": metrics_path}
+        if session_id:
+            headers["X-Session-Id"] = str(session_id)
+            
         return FileResponse(
             output_path,
             media_type="video/mp4",
-            headers={"X-Metrics-Path": metrics_path}
+            headers=headers
         )
         
     except Exception as e:
@@ -304,12 +367,22 @@ async def get_metrics(video_id: str):
     import json
     import re
     try:
+        print(f"DEBUG: Metrics request received")
+        
         # Security: Validate video_id format to prevent path traversal
         if not re.match(r'^[a-zA-Z0-9_-]+$', video_id):
+            print(f"DEBUG: Invalid video_id format")
             raise HTTPException(status_code=400, detail="Invalid video ID format")
         
-        # Construct metrics file path
-        metrics_path = f"/tmp/{video_id}_metrics.json"
+        # Construct metrics file path - use proper temp directory
+        import tempfile
+        temp_dir = tempfile.gettempdir()
+        metrics_path = os.path.join(temp_dir, f"{video_id}_metrics.json")
+        print(f"DEBUG: Looking for metrics file at: {metrics_path}")
+        print(f"DEBUG: File exists: {os.path.exists(metrics_path)}")
+        
+        # List all files in temp directory to see what's actually there
+        print(f"DEBUG: Files in {temp_dir}: {[f for f in os.listdir(temp_dir) if 'metrics.json' in f]}")
         
         if not os.path.exists(metrics_path):
             raise HTTPException(status_code=404, detail="Metrics not found")
@@ -317,7 +390,81 @@ async def get_metrics(video_id: str):
         with open(metrics_path, 'r') as f:
             metrics = json.load(f)
         
+        print(f"DEBUG: Successfully loaded metrics: {metrics}")
         return JSONResponse(content=metrics)
+    except Exception as e:
+        print(f"DEBUG: Error in get_metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/workout-sessions/")
+async def get_workout_sessions(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    limit: int = 50,
+    offset: int = 0
+):
+    """Get user's workout sessions"""
+    try:
+        response = supabase.table("workout_sessions") \
+            .select("*") \
+            .eq("user_id", current_user["id"]) \
+            .order("session_date", desc=True) \
+            .range(offset, offset + limit - 1) \
+            .execute()
+        
+        return {"sessions": response.data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/workout-sessions/{session_id}/reps")
+async def get_session_reps(
+    session_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get rep analysis for a specific session"""
+    try:
+        # Verify session belongs to user
+        session_response = supabase.table("workout_sessions") \
+            .select("id") \
+            .eq("id", session_id) \
+            .eq("user_id", current_user["id"]) \
+            .execute()
+        
+        if not session_response.data:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Get rep analysis
+        reps_response = supabase.table("rep_analysis") \
+            .select("*") \
+            .eq("session_id", session_id) \
+            .order("rep_number", desc=False) \
+            .execute()
+        
+        return {"reps": reps_response.data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/workout-sessions/{session_id}")
+async def delete_workout_session(
+    session_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Delete a workout session"""
+    try:
+        # Verify session belongs to user and delete
+        response = supabase.table("workout_sessions") \
+            .delete() \
+            .eq("id", session_id) \
+            .eq("user_id", current_user["id"]) \
+            .execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        return {"message": "Session deleted successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

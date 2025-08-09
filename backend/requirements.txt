@@ -3,3 +3,6 @@ ultralytics
 opencv-python
 uvicorn
 python-multipart
+supabase
+python-jose[cryptography]
+python-dotenv

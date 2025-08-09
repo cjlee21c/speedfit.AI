@@ -51,6 +51,7 @@ class WorkoutData: ObservableObject {
     @Published var plateSize: PlateSize = .standard45
     @Published var processedVideoURL: URL?
     @Published var sessionMetrics: SessionMetrics?
+    @Published var sessionId: String?
     @Published var isUploading: Bool = false
     
     func reset() {
@@ -60,6 +61,7 @@ class WorkoutData: ObservableObject {
         plateSize = .standard45
         processedVideoURL = nil
         sessionMetrics = nil
+        sessionId = nil
         isUploading = false
     }
 }

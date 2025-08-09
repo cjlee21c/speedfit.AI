@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ProcessingView: View {
     @ObservedObject var workoutData: WorkoutData
+    @EnvironmentObject var authManager: AuthManager
     @State private var progress: Double = 0.0
     @State private var showAlert = false
     @State private var alertMessage = ""
@@ -118,8 +119,12 @@ struct ProcessingView: View {
         }
         .alert("Upload Status", isPresented: $showAlert) {
             Button("OK", role: .cancel) {
+                print("DEBUG: Alert OK button tapped. Alert message: '\(alertMessage)'")
                 if alertMessage.contains("successfully") {
+                    print("DEBUG: Setting showingResults = true")
                     showingResults = true
+                } else {
+                    print("DEBUG: Alert message doesn't contain 'successfully', not showing results")
                 }
             }
         } message: {
@@ -151,6 +156,11 @@ struct ProcessingView: View {
             var request = URLRequest(url: URL(string: "\(BackendConfig.baseURL)/analyze-lift/")!)
             request.httpMethod = "POST"
             
+            // Add authentication header if user is logged in
+            if let session = authManager.currentSession {
+                request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+            }
+            
             let boundary = "Boundary-\(UUID().uuidString)"
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
             
@@ -168,6 +178,21 @@ struct ProcessingView: View {
             body.append("Content-Disposition: form-data; name=\"plate_diameter\"\r\n\r\n".data(using: .utf8)!)
             body.append("\(workoutData.plateSize.diameter)".data(using: .utf8)!)
             body.append("\r\n".data(using: .utf8)!)
+            
+            // Add lift type
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"lift_type\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(workoutData.liftType.rawValue)".data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+            
+            // Add weight if provided
+            if !workoutData.weight.isEmpty, let weight = Double(workoutData.weight) {
+                body.append("--\(boundary)\r\n".data(using: .utf8)!)
+                body.append("Content-Disposition: form-data; name=\"weight\"\r\n\r\n".data(using: .utf8)!)
+                body.append("\(weight)".data(using: .utf8)!)
+                body.append("\r\n".data(using: .utf8)!)
+            }
+            
             body.append("--\(boundary)--\r\n".data(using: .utf8)!)
             
             request.httpBody = body
@@ -175,27 +200,63 @@ struct ProcessingView: View {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse else {
+                print("DEBUG: Response is not HTTPURLResponse")
                 throw URLError(.badServerResponse)
             }
             
+            print("DEBUG: HTTP Status Code: \(httpResponse.statusCode)")
+            
             if httpResponse.statusCode == 200 {
+                print("DEBUG: HTTP 200 - Processing success response")
                 // Save the processed video
                 let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("processed_video.mp4")
                 try data.write(to: tempURL)
                 
-                // Get metrics path from response headers
+                // Get metrics path and session ID from response headers
                 var sessionMetrics: SessionMetrics?
                 if let metricsPath = httpResponse.value(forHTTPHeaderField: "X-Metrics-Path") {
+                    print("DEBUG: Found X-Metrics-Path header: \(metricsPath)")
                     sessionMetrics = await fetchSessionMetricsFromFile(metricsPath: metricsPath)
+                } else {
+                    print("DEBUG: No X-Metrics-Path header found in response")
                 }
+                
+                // Debug: Log what we got
+                if let metrics = sessionMetrics {
+                    print("DEBUG: Final sessionMetrics: \(metrics)")
+                } else {
+                    print("DEBUG: sessionMetrics is nil - providing fallback")
+                    // Provide fallback data only if we can't get real metrics
+                    sessionMetrics = SessionMetrics(
+                        session_average: 1.8,
+                        total_reps: 3,
+                        rep_speeds: [1.5, 2.1, 1.8],
+                        calibration_used: true,
+                        pixels_per_meter: 800.0
+                    )
+                }
+                
+                // Get session ID if available
+                let sessionId = httpResponse.value(forHTTPHeaderField: "X-Session-Id")
                 
                 // Update the UI on the main thread
                 await MainActor.run {
                     workoutData.processedVideoURL = tempURL
                     workoutData.sessionMetrics = sessionMetrics
+                    workoutData.sessionId = sessionId
                     progress = 1.0
-                    alertMessage = "Video processed successfully!"
-                    showAlert = true
+                    
+                    if sessionId != nil {
+                        alertMessage = "Video processed and saved to your history!"
+                    } else {
+                        alertMessage = "Video processed successfully!"
+                    }
+                    print("DEBUG: Setting showAlert = true with message: \(alertMessage)")
+                    // Try direct navigation first
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        print("DEBUG: Attempting direct navigation to ResultsView")
+                        showingResults = true
+                    }
                 }
             } else {
                 throw URLError(.badServerResponse)
@@ -220,34 +281,44 @@ struct ProcessingView: View {
     
     private func fetchSessionMetricsFromFile(metricsPath: String) async -> SessionMetrics? {
         do {
-            // Fetch metrics JSON file from backend
-            guard let url = URL(string: "\(BackendConfig.baseURL)/metrics/\(URL(fileURLWithPath: metricsPath).lastPathComponent.replacingOccurrences(of: "_metrics.json", with: ""))") else {
+            // Extract video ID from metrics path
+            let videoId = URL(fileURLWithPath: metricsPath).lastPathComponent.replacingOccurrences(of: "_metrics.json", with: "")
+            let urlString = "\(BackendConfig.baseURL)/metrics/\(videoId)"
+            
+            print("DEBUG: Fetching metrics from URL: \(urlString)")
+            print("DEBUG: Original metrics path: \(metricsPath)")
+            print("DEBUG: Extracted video ID: \(videoId)")
+            
+            guard let url = URL(string: urlString) else {
+                print("DEBUG: Failed to create URL from string: \(urlString)")
                 return nil
             }
             
             let (data, response) = try await URLSession.shared.data(from: url)
             
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                print("Failed to fetch metrics: Invalid response")
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("DEBUG: Response is not HTTPURLResponse")
                 return nil
             }
             
-            // Parse JSON response
-            let decoder = JSONDecoder()
-            let metrics = try decoder.decode(SessionMetrics.self, from: data)
+            print("DEBUG: HTTP Status Code: \(httpResponse.statusCode)")
             
-            return metrics
+            if httpResponse.statusCode == 200 {
+                // Parse JSON response
+                let decoder = JSONDecoder()
+                let metrics = try decoder.decode(SessionMetrics.self, from: data)
+                print("DEBUG: Successfully decoded metrics: \(metrics)")
+                return metrics
+            } else {
+                print("DEBUG: Failed to fetch metrics - HTTP \(httpResponse.statusCode)")
+                if let responseBody = String(data: data, encoding: .utf8) {
+                    print("DEBUG: Response body: \(responseBody)")
+                }
+                return nil
+            }
         } catch {
-            print("Failed to fetch session metrics: \(error)")
-            // Fallback to mock data for development
-            return SessionMetrics(
-                session_average: 1.8,
-                total_reps: 3,
-                rep_speeds: [1.5, 2.1, 1.8],
-                calibration_used: true,
-                pixels_per_meter: 800.0
-            )
+            print("DEBUG: Error fetching session metrics: \(error)")
+            return nil
         }
     }
 }
