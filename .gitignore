@@ -8,12 +8,53 @@ backend/models/*.pt
 backend/__pycache__/
 backend/.env
 
-# iOS
+# iOS - Xcode user settings and build artifacts
 Speedfit.AI.xcodeproj/xcuserdata/
 Speedfit.AI.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+build/
+DerivedData/
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
 
-# Temporary files
+# Swift Package Manager
+.swiftpm/
+.build/
+
+# Claude Code specific
+.claude/
+CLAUDE.md
+
+# Documentation (internal)
+AUTHENTICATION_SETUP.md
+PROJECT_STATUS.md
+
+# Test directories (uncomment next 2 lines if you don't want tests in repo)
+Speedfit.AITests/
+Speedfit.AIUITests/
+
+# System files
+.DS_Store
 *.tmp
 temp/
 logs/
+
+# Python cache and environments
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+dist/
+.tox/
+.coverage
+.pytest_cache/
+
+# Video files (uncomment if you don't want test videos in repo)
+# *.mp4
+# *.mov
+# *.avi
